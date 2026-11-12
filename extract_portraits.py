@@ -92,6 +92,15 @@ def extract():
             destination = ROOT / f"mika-{expression}.png"
             portrait.save(destination)
             print(destination.name, portrait.size)
+    extract_avatar()
+
+
+def extract_avatar():
+    """A face-focused square for Streamlit's circular message avatar."""
+    with Image.open(ROOT / "mika-happy.png") as happy:
+        face = happy.crop((75, 35, 325, 285)).resize((256, 256), Image.Resampling.LANCZOS)
+        face.save(ROOT / "mika-avatar.png")
+        print("mika-avatar.png", face.size)
 
 
 if __name__ == "__main__":

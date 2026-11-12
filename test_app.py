@@ -41,11 +41,9 @@ class CompanionTests(unittest.TestCase):
         page.button(key="starter_3").click().run()
         self.assertEqual(page.session_state.messages[0]["content"], app.STARTERS["Talk music & movies"])
         page.text_input(key="companion_name").set_value("Nova").run()
-        page.selectbox(key="personality").select("Playful").run()
-        page.selectbox(key="avatar").select("Fox").run()
         self.assertEqual(len(page.session_state.messages), 2)
         page.chat_input[0].set_value("hello").run()
-        self.assertIn("sparkle", page.session_state.messages[-1]["content"])
+        self.assertIn("Hello!", page.session_state.messages[-1]["content"])
         page.radio[0].set_value(app.LOCAL).run()
         self.assertEqual(page.session_state.messages, [])
         self.assertFalse(page.exception)
@@ -118,6 +116,49 @@ class CompanionTests(unittest.TestCase):
         page.selectbox(key="character_view").select("Portrait").run()
         self.assertFalse(page.exception)
 
+    def test_pin_and_movement_settings_preserve_chat(self):
+        page = AppTest.from_file("app.py").run()
+        self.assertTrue(page.checkbox(key="pin_character").value)
+        self.assertEqual(page.selectbox(key="character_motion").value, "Gentle depth (2.5D)")
+        page.chat_input[0].set_value("Hello").run()
+        history = list(page.session_state.messages)
+        page.checkbox(key="pin_character").uncheck().run()
+        page.selectbox(key="character_motion").select("Still").run()
+        self.assertEqual(page.session_state.messages, history)
+        html = companion_ui.portrait_html("Mika", "happy", pinned=False, motion="Still")
+        self.assertNotIn("pinned-character", html)
+        self.assertIn("motion-still", html)
+        self.assertNotIn('class="portrait-blink"', html)
+        self.assertFalse(page.exception)
+
+    def test_auto_scroll_is_triggered_by_messages_not_settings(self):
+        with patch("companion_ui.scroll_to_latest") as scroll:
+            page = AppTest.from_file("app.py").run()
+            scroll.assert_not_called()
+            page.chat_input[0].set_value("Hello Mika").run()
+            event = page.session_state.scroll_event
+            self.assertGreaterEqual(scroll.call_count, 2)
+            self.assertEqual(scroll.call_args.args[0], event)
+            page.text_input(key="companion_name").set_value("Nova").run()
+            self.assertEqual(page.session_state.scroll_event, event)
+            page.chat_input[0].set_value("How about a fun weekend?").run()
+            self.assertNotEqual(page.session_state.scroll_event, event)
+            self.assertFalse(page.exception)
+
+    def test_mika_face_is_the_message_avatar(self):
+        with Image.open(companion_ui.CHAT_AVATAR) as image:
+            self.assertEqual(image.size, (256, 256))
+        page = AppTest.from_file("app.py").run()
+        self.assertNotIn("Chat icon", [item.label for item in page.selectbox])
+        page.chat_input[0].set_value("Hello Mika").run()
+        message = page.chat_message[-1]
+        self.assertEqual(message.caption[0].value, "Mika")
+        self.assertRegex(page.session_state.messages[-1]["time"], r"^\d{2}:\d{2}$")
+        self.assertEqual(message.caption[-1].value, page.session_state.messages[-1]["time"])
+        self.assertTrue(message.proto.avatar)
+        self.assertIn("media/", message.proto.avatar)
+        self.assertFalse(page.exception)
+
     def test_existing_session_provider_and_history_survive(self):
         page = AppTest.from_file("app.py")
         history = [{"role": "user", "content": "An existing message"},
@@ -126,11 +167,13 @@ class CompanionTests(unittest.TestCase):
         page.session_state["messages"] = history
         page.session_state["companion_name"] = "Existing name"
         page.session_state["ollama_model"] = local.DEFAULT_MODEL
+        page.session_state["personality"] = "Playful"
         page.run()
         self.assertEqual(page.radio[0].value, app.LOCAL)
         self.assertEqual(page.session_state.messages, history)
         self.assertEqual(page.subheader[0].value, "Chat with Existing name")
         self.assertEqual(page.text_input(key="ollama_model").value, local.DEFAULT_MODEL)
+        self.assertNotIn("Personality", [item.label for item in page.selectbox])
         self.assertFalse(page.exception)
 
     def test_portrait_assets_share_canvas_and_remove_labels(self):
@@ -142,15 +185,17 @@ class CompanionTests(unittest.TestCase):
                 # Labels begin below the shared shoulder cut; no alpha there.
                 self.assertIsNone(image.getchannel("A").crop((0, 380, 420, 420)).getbbox())
 
-    def test_download_and_personalities(self):
-        text = app.conversation_text([{"role": "user", "content": "Hello!"}], "Nova", "Thoughtful", app.LOCAL)
+    def test_download_and_consistent_personality(self):
+        text = app.conversation_text([{"role": "user", "content": "Hello!"}], "Nova", app.LOCAL)
         self.assertIn("Nova (AI)", text)
         self.assertIn("You:\nHello!", text)
-        for personality, instruction in app.PERSONALITIES.items():
-            system = app.companion_instructions("Nova", personality)
-            self.assertIn(instruction, system)
-            self.assertIn("Nova", system)
-            self.assertIn("You are an AI", system)
+        self.assertNotIn("Personality:", text)
+        system = app.companion_instructions("Nova")
+        self.assertIn(app.PERSONALITY, system)
+        self.assertIn("warm, playful, thoughtful, and supportive", system)
+        self.assertIn("Nova", system)
+        self.assertIn("You are an AI", system)
+        self.assertEqual(app.reply_expression("I'm upset, please don't joke"), "happy")
 
     def test_old_demo_labels_are_cosmetic_and_disclosure_remains(self):
         text = "[Scripted demo reply] Hello!"
@@ -170,7 +215,6 @@ class CompanionTests(unittest.TestCase):
         page = AppTest.from_file("app.py").run()
         page.selectbox(key="character_view").select("Portrait").run()
         page.checkbox(key="portrait_blinking").uncheck().run()
-        page.selectbox(key="personality").select("Playful").run()
         page.chat_input[0].set_value("Let's imagine a fun weekend").run()
         self.assertEqual(page.session_state.portrait_expression, "playful")
         self.assertFalse(page.exception)

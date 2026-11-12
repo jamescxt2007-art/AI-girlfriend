@@ -1,4 +1,4 @@
-from companion_logic import (AVATARS, BIOS, DEMO, LOCAL, PERSONALITIES, STARTERS,
+from companion_logic import (BIO, DEMO, LOCAL, PERSONALITY, STARTERS,
     chat_text, companion_instructions, conversation_text, demo_reply, reply_expression)
 
 
